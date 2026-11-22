@@ -4,6 +4,7 @@ import { useAuth } from '../auth/AuthContext';
 import { rolePaths } from '../constants';
 
 const demoAccounts = [
+  ['Chủ doanh nghiệp', 'owner.demo'],
   ['Khách hàng', 'customer.demo'],
   ['Quản lý', 'manager.demo'],
   ['Đầu bếp', 'chef.demo'],

@@ -18,6 +18,9 @@ CREATE TABLE dbo.Branches (
     BranchID INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_Branches PRIMARY KEY,
     BranchName NVARCHAR(100) NOT NULL,
     Address NVARCHAR(255) NULL,
+    BankID NVARCHAR(50) NULL,
+    AccountNo NVARCHAR(50) NULL,
+    AccountName NVARCHAR(120) NULL,
     IsActive BIT NOT NULL CONSTRAINT DF_Branches_IsActive DEFAULT (1)
 );
 GO
@@ -31,8 +34,9 @@ CREATE TABLE dbo.Users (
     BranchID INT NULL,
     DeliveryArea NVARCHAR(100) NULL,
     Phone NVARCHAR(30) NULL,
+    IsActive BIT NOT NULL CONSTRAINT DF_Users_IsActive DEFAULT (1),
     CreatedAt DATETIME2 NOT NULL CONSTRAINT DF_Users_CreatedAt DEFAULT (SYSUTCDATETIME()),
-    CONSTRAINT CK_Users_Role CHECK (Role IN (N'CUSTOMER', N'MANAGER', N'CHEF', N'SHIPPER')),
+    CONSTRAINT CK_Users_Role CHECK (Role IN (N'OWNER', N'CUSTOMER', N'MANAGER', N'CHEF', N'SHIPPER')),
     CONSTRAINT FK_Users_Branches FOREIGN KEY (BranchID) REFERENCES dbo.Branches(BranchID)
 );
 GO
@@ -78,6 +82,7 @@ CREATE TABLE dbo.Orders (
     ShipperID INT NULL,
     TotalAmount DECIMAL(18,0) NOT NULL CONSTRAINT DF_Orders_TotalAmount DEFAULT (0),
     Status NVARCHAR(30) NOT NULL CONSTRAINT DF_Orders_Status DEFAULT (N'Chờ thanh toán'),
+    PaymentMethod NVARCHAR(20) NULL,
     CreatedAt DATETIME2 NOT NULL CONSTRAINT DF_Orders_CreatedAt DEFAULT (SYSUTCDATETIME()),
     CONSTRAINT CK_Orders_Status CHECK (
         Status IN (N'Chờ thanh toán', N'Chờ xác nhận thanh toán', N'Chờ duyệt',
@@ -91,6 +96,7 @@ CREATE TABLE dbo.Orders (
             AND Latitude BETWEEN -90 AND 90 AND Longitude BETWEEN -180 AND 180
         )
     ),
+    CONSTRAINT CK_Orders_PaymentMethod CHECK (PaymentMethod IS NULL OR PaymentMethod IN (N'CASH', N'VIETQR')),
     CONSTRAINT FK_Orders_Branches FOREIGN KEY (BranchID) REFERENCES dbo.Branches(BranchID),
     CONSTRAINT FK_Orders_DiningTables FOREIGN KEY (TableID) REFERENCES dbo.DiningTables(TableID),
     CONSTRAINT FK_Orders_Customers FOREIGN KEY (CustomerID) REFERENCES dbo.Users(UserID),
@@ -132,6 +138,7 @@ DECLARE @seedPasswordHash NVARCHAR(100) =
 INSERT INTO dbo.Users (FullName, Username, PasswordHash, Role, BranchID, DeliveryArea, Phone)
 VALUES
     (N'Khách hàng mẫu', N'customer.demo', @seedPasswordHash, N'CUSTOMER', NULL, NULL, N'0900000001'),
+    (N'Chủ doanh nghiệp', N'owner.demo', @seedPasswordHash, N'OWNER', NULL, NULL, N'0900000005'),
     (N'Quản lý mẫu', N'manager.demo', @seedPasswordHash, N'MANAGER', NULL, NULL, N'0900000002'),
     (N'Đầu bếp mẫu', N'chef.demo', @seedPasswordHash, N'CHEF', @chefBranchID, NULL, N'0900000003'),
     (N'Nhân viên giao hàng mẫu', N'shipper.demo', @seedPasswordHash, N'SHIPPER', NULL, N'Quận 1', N'0900000004');

@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import ProtectedRoute from './auth/ProtectedRoute';
@@ -8,6 +9,8 @@ import LoginPage from './pages/LoginPage';
 import ManagerPage from './pages/ManagerPage';
 import RegisterPage from './pages/RegisterPage';
 import ShipperPage from './pages/ShipperPage';
+
+const OwnerDashboard = lazy(() => import('./pages/OwnerDashboard'));
 
 function HomeRedirect() {
   const { user, loading } = useAuth();
@@ -28,6 +31,13 @@ function AppRoutes() {
       <Route path="/" element={<HomeRedirect />} />
       <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
       <Route path="/register" element={<PublicRoute><RegisterPage /></PublicRoute>} />
+      <Route path="/owner" element={
+        <ProtectedRoute roles={['OWNER']}>
+          <Suspense fallback={<div className="p-10 text-center text-slate-500">Đang tải trang điều hành...</div>}>
+            <OwnerDashboard />
+          </Suspense>
+        </ProtectedRoute>
+      } />
       <Route path="/customer" element={
         <ProtectedRoute roles={['CUSTOMER']}><CustomerPage /></ProtectedRoute>
       } />
