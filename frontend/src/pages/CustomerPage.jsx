@@ -17,6 +17,7 @@ function CustomerPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [paymentOrder, setPaymentOrder] = useState(null);
 
   const refreshOrders = useCallback(async () => {
     const { data } = await api.get('/customer/orders');
@@ -84,13 +85,27 @@ function CustomerPage() {
     [cart],
   );
 
+  const paymentQrUrl = useMemo(() => {
+    const bankId = import.meta.env.VITE_BANK_ID;
+    const accountNo = import.meta.env.VITE_ACCOUNT_NO;
+    const accountName = import.meta.env.VITE_ACCOUNT_NAME;
+    if (!paymentOrder || !bankId || !accountNo || !accountName) return '';
+
+    const params = new URLSearchParams({
+      amount: String(paymentOrder.totalAmount),
+      addInfo: `THANHTOAN DON ${paymentOrder.orderId}`,
+      accountName,
+    });
+    return `https://img.vietqr.io/image/${encodeURIComponent(bankId)}-${encodeURIComponent(accountNo)}-compact2.png?${params}`;
+  }, [paymentOrder]);
+
   const submitOrder = async (event) => {
     event.preventDefault();
     setLoading(true);
     setError('');
     setNotice('');
     try {
-      await api.post('/customer/orders', {
+      const { data } = await api.post('/customer/orders', {
         branchId: Number(branchId),
         deliveryAddress,
         deliveryArea,
@@ -98,8 +113,13 @@ function CustomerPage() {
       });
       setCart([]);
       setDeliveryAddress('');
-      setNotice('Đã gửi đơn hàng. Đơn đang chờ quản lý duyệt.');
-      setOrders(await refreshOrders());
+      setPaymentOrder({ orderId: data.orderId, totalAmount: Number(data.totalAmount) });
+      setNotice(`Đã tạo đơn hàng #${data.orderId}. Quét mã QR bên dưới để thanh toán.`);
+      try {
+        setOrders(await refreshOrders());
+      } catch {
+        setError('Đơn đã được tạo nhưng không tải được lịch sử đơn hàng.');
+      }
     } catch (requestError) {
       setError(requestError.response?.data?.error || 'Không thể tạo đơn hàng.');
     } finally {
@@ -219,6 +239,30 @@ function CustomerPage() {
               {loading ? 'Đang gửi đơn...' : 'Đặt hàng'}
             </button>
           </form>
+          {paymentOrder && (
+            <section className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4" aria-labelledby="payment-title">
+              <h3 id="payment-title" className="font-bold text-emerald-900">
+                Thanh toán đơn #{paymentOrder.orderId}
+              </h3>
+              <p className="mt-1 text-sm text-emerald-800">
+                Số tiền: <strong>{paymentOrder.totalAmount.toLocaleString('vi-VN')}đ</strong>
+              </p>
+              {paymentQrUrl ? (
+                <img
+                  src={paymentQrUrl}
+                  alt={`Mã QR thanh toán đơn hàng ${paymentOrder.orderId}`}
+                  className="mx-auto mt-3 w-full max-w-64 rounded-lg bg-white p-2"
+                />
+              ) : (
+                <p className="mt-3 text-sm text-rose-700" role="alert">
+                  Chưa cấu hình thông tin tài khoản nhận thanh toán.
+                </p>
+              )}
+              <p className="mt-3 text-xs text-slate-600">
+                Nội dung chuyển khoản: THANHTOAN DON {paymentOrder.orderId}. Trạng thái thanh toán chưa tự cập nhật sau khi chuyển khoản.
+              </p>
+            </section>
+          )}
         </aside>
       </section>
     </RoleLayout>

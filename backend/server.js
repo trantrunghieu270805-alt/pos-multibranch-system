@@ -373,17 +373,17 @@ app.post('/api/customer/orders', authenticateToken, authorizeRoles('CUSTOMER'), 
           VALUES (@orderId, @productId, @quantity, @unitPrice, @note)
         `);
     }
-    return orderId;
+    return { orderId, totalAmount };
   });
 
   emitOrderUpdate({
-    orderId: result,
+    orderId: result.orderId,
     status: 'Chờ duyệt',
     branchId,
     customerId: req.user.userId,
     action: 'ORDER_CREATED',
   });
-  res.status(201).json({ orderId: result, status: 'Chờ duyệt' });
+  res.status(201).json({ ...result, status: 'Chờ duyệt' });
 }));
 
 app.get('/api/manager/orders', authenticateToken, authorizeRoles('MANAGER'), asyncRoute(async (req, res) => {
