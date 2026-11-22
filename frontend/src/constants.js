@@ -1,12 +1,17 @@
 export const deliveryAreas = [
   'Quận 1',
+  'Quận 3',
   'Bình Thạnh',
   'Thủ Đức',
-  'Quận 3',
   'Gò Vấp',
-  'Quận 7',
   'Tân Bình',
+  'Phú Nhuận',
+  'Quận 7',
+  'Quận 10',
+  'Bình Tân',
 ];
+
+export const defaultDeliveryArea = 'Quận 1';
 
 export const rolePaths = {
   CUSTOMER: '/customer',

@@ -73,13 +73,23 @@ CREATE TABLE dbo.Orders (
     CustomerID INT NULL,
     DeliveryAddress NVARCHAR(255) NULL,
     DeliveryArea NVARCHAR(100) NULL,
+    Latitude DECIMAL(9,6) NULL,
+    Longitude DECIMAL(9,6) NULL,
     ShipperID INT NULL,
     TotalAmount DECIMAL(18,0) NOT NULL CONSTRAINT DF_Orders_TotalAmount DEFAULT (0),
-    Status NVARCHAR(30) NOT NULL CONSTRAINT DF_Orders_Status DEFAULT (N'Chờ duyệt'),
+    Status NVARCHAR(30) NOT NULL CONSTRAINT DF_Orders_Status DEFAULT (N'Chờ thanh toán'),
     CreatedAt DATETIME2 NOT NULL CONSTRAINT DF_Orders_CreatedAt DEFAULT (SYSUTCDATETIME()),
     CONSTRAINT CK_Orders_Status CHECK (
-        Status IN (N'Chờ duyệt', N'Chờ chế biến', N'Đang chế biến',
-                   N'Bếp hoàn thành', N'Đang giao hàng', N'Hoàn tất')
+        Status IN (N'Chờ thanh toán', N'Chờ xác nhận thanh toán', N'Chờ duyệt',
+                   N'Chờ chế biến', N'Đang chế biến', N'Bếp hoàn thành',
+                   N'Chờ Shipper xác nhận', N'Đang giao hàng', N'Hoàn tất')
+    ),
+    CONSTRAINT CK_Orders_DeliveryCoordinates CHECK (
+        (Latitude IS NULL AND Longitude IS NULL)
+        OR (
+            Latitude IS NOT NULL AND Longitude IS NOT NULL
+            AND Latitude BETWEEN -90 AND 90 AND Longitude BETWEEN -180 AND 180
+        )
     ),
     CONSTRAINT FK_Orders_Branches FOREIGN KEY (BranchID) REFERENCES dbo.Branches(BranchID),
     CONSTRAINT FK_Orders_DiningTables FOREIGN KEY (TableID) REFERENCES dbo.DiningTables(TableID),
@@ -114,7 +124,7 @@ VALUES
     (N'Chi nhánh trung tâm', N'Quận 1, TP. Hồ Chí Minh'),
     (N'Chi nhánh Thủ Đức', N'TP. Thủ Đức, TP. Hồ Chí Minh');
 
-DECLARE @branchID INT = (SELECT TOP (1) BranchID FROM dbo.Branches ORDER BY BranchID);
+DECLARE @chefBranchID INT = (SELECT BranchID FROM dbo.Branches WHERE BranchName = N'Chi nhánh Thủ Đức');
 DECLARE @seedPasswordHash NVARCHAR(100) =
     N'$2b$10$VsTNb/iNt/9EG2VvCoXI3OqCujWZpWRzFOwm9tXyyUIJQZnlZxsfK';
 
@@ -123,7 +133,7 @@ INSERT INTO dbo.Users (FullName, Username, PasswordHash, Role, BranchID, Deliver
 VALUES
     (N'Khách hàng mẫu', N'customer.demo', @seedPasswordHash, N'CUSTOMER', NULL, NULL, N'0900000001'),
     (N'Quản lý mẫu', N'manager.demo', @seedPasswordHash, N'MANAGER', NULL, NULL, N'0900000002'),
-    (N'Đầu bếp mẫu', N'chef.demo', @seedPasswordHash, N'CHEF', @branchID, NULL, N'0900000003'),
+    (N'Đầu bếp mẫu', N'chef.demo', @seedPasswordHash, N'CHEF', @chefBranchID, NULL, N'0900000003'),
     (N'Nhân viên giao hàng mẫu', N'shipper.demo', @seedPasswordHash, N'SHIPPER', NULL, N'Quận 1', N'0900000004');
 
 INSERT INTO dbo.Categories (CategoryName)

@@ -95,7 +95,7 @@ function ChefPage() {
         ))}
         {!orders.length && !error && (
           <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 md:col-span-2 xl:col-span-3">
-            Hiện chưa có đơn hàng cần chế biến.
+            Hiện chưa có đơn hàng cần chế biến tại chi nhánh được gán cho tài khoản bếp.
           </div>
         )}
       </div>

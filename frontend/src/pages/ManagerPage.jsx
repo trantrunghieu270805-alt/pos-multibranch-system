@@ -61,7 +61,7 @@ function ManagerPage() {
     try {
       if (action === 'approve') {
         await api.post(`/manager/orders/${order.OrderID}/approve`);
-        setNotice(`Đã duyệt đơn #${order.OrderID} và chuyển xuống bếp.`);
+        setNotice(`Đã xác nhận thanh toán và chuyển đơn #${order.OrderID} xuống bếp.`);
       } else {
         const shipperId = Number(selectedShipper[order.OrderID]);
         if (!shipperId) {
@@ -69,7 +69,7 @@ function ManagerPage() {
           return;
         }
         await api.post(`/manager/orders/${order.OrderID}/dispatch`, { shipperId });
-        setNotice(`Đã giao đơn #${order.OrderID} cho Shipper.`);
+        setNotice(`Đã phân công Shipper cho đơn #${order.OrderID}; đang chờ Shipper xác nhận.`);
       }
       await loadData();
     } catch (requestError) {
@@ -102,7 +102,7 @@ function ManagerPage() {
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-xl font-bold text-slate-800">Đơn hàng toàn hệ thống</h2>
-              <p className="text-sm text-slate-500">Danh sách cập nhật tự động khi đơn hàng thay đổi.</p>
+              <p className="text-sm text-slate-500">Đối chiếu giao dịch ngân hàng trước khi xác nhận thanh toán và duyệt đơn.</p>
             </div>
             <span className="rounded-full bg-indigo-50 px-3 py-1 text-sm font-semibold text-indigo-700">{orders.length} đơn</span>
           </div>
@@ -129,12 +129,17 @@ function ManagerPage() {
                   {(order.items || []).map((item) => <li key={item.OrderItemID}>{item.ProductName} × {item.Quantity}</li>)}
                 </ul>
 
-                {order.Status === 'Chờ duyệt' && (
-                  <button type="button" disabled={busyOrder === order.OrderID}
-                    onClick={() => runOrderAction(order, 'approve')}
-                    className="mt-4 w-full rounded-xl bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60">
-                    {busyOrder === order.OrderID ? 'Đang xử lý...' : 'Duyệt đơn'}
-                  </button>
+                {['Chờ xác nhận thanh toán', 'Chờ duyệt'].includes(order.Status) && (
+                  <>
+                    <p className="mt-4 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">
+                      Hãy kiểm tra giao dịch đã vào tài khoản ngân hàng trước khi duyệt.
+                    </p>
+                    <button type="button" disabled={busyOrder === order.OrderID}
+                      onClick={() => runOrderAction(order, 'approve')}
+                      className="mt-4 w-full rounded-xl bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60">
+                      {busyOrder === order.OrderID ? 'Đang xử lý...' : 'Xác nhận thanh toán & duyệt'}
+                    </button>
+                  </>
                 )}
                 {order.Status === 'Bếp hoàn thành' && !order.ShipperID && (
                   <div className="mt-4 flex gap-2">
@@ -152,7 +157,7 @@ function ManagerPage() {
                     <button type="button" disabled={busyOrder === order.OrderID || !(shippers[order.DeliveryArea] || []).length}
                       onClick={() => runOrderAction(order, 'dispatch')}
                       className="flex items-center gap-1 rounded-xl bg-emerald-600 px-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:bg-slate-300">
-                      <Truck className="h-4 w-4" /> Giao
+                      <Truck className="h-4 w-4" /> Phân công
                     </button>
                   </div>
                 )}

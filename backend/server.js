@@ -23,9 +23,30 @@ const io = new Server(server, {
   },
 });
 
-const deliveryAreas = ['Quận 1', 'Bình Thạnh', 'Thủ Đức', 'Quận 3', 'Gò Vấp', 'Quận 7', 'Tân Bình'];
+const deliveryAreas = [
+  'Quận 1',
+  'Quận 3',
+  'Bình Thạnh',
+  'Thủ Đức',
+  'Gò Vấp',
+  'Tân Bình',
+  'Phú Nhuận',
+  'Quận 7',
+  'Quận 10',
+  'Bình Tân',
+];
 const passwordPattern = /^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
-const workflowStatuses = ['Chờ duyệt', 'Chờ chế biến', 'Đang chế biến', 'Bếp hoàn thành', 'Đang giao hàng', 'Hoàn tất'];
+const workflowStatuses = [
+  'Chờ thanh toán',
+  'Chờ xác nhận thanh toán',
+  'Chờ duyệt',
+  'Chờ chế biến',
+  'Đang chế biến',
+  'Bếp hoàn thành',
+  'Chờ Shipper xác nhận',
+  'Đang giao hàng',
+  'Hoàn tất',
+];
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -143,10 +164,24 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  const { userId, role, branchId } = socket.user;
+  const { userId, role } = socket.user;
   socket.join(`role:${role}`);
   socket.join(`user:${userId}`);
-  if (role === 'CHEF' && branchId) socket.join(`branch:${branchId}`);
+  if (role === 'CHEF') {
+    getPool()
+      .then((pool) => loadUser(userId, pool))
+      .then((chef) => {
+        const branchId = positiveInteger(chef && chef.BranchID);
+        if (branchId) {
+          socket.data.branchId = branchId;
+          socket.join(`branch:${branchId}`);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to subscribe chef to branch:', error);
+        socket.disconnect(true);
+      });
+  }
 
   const joinShipperArea = (area) => {
     if (socket.data.deliveryArea) socket.leave(`delivery-area:${socket.data.deliveryArea}`);
@@ -179,7 +214,7 @@ io.on('connection', (socket) => {
 
   socket.on('join_branch', (value) => {
     const requestedBranch = positiveInteger(value);
-    if (role === 'MANAGER' || (role === 'CHEF' && requestedBranch === branchId)) {
+    if (requestedBranch && (role === 'MANAGER' || (role === 'CHEF' && requestedBranch === socket.data.branchId))) {
       socket.join(`branch:${requestedBranch}`);
     }
   });
@@ -303,17 +338,64 @@ app.get('/api/customer/orders', authenticateToken, authorizeRoles('CUSTOMER'), a
   res.json(await attachOrderItems(pool, result.recordset));
 }));
 
+app.post('/api/customer/orders/:orderId/payment-confirmation', authenticateToken, authorizeRoles('CUSTOMER'), asyncRoute(async (req, res) => {
+  const orderId = positiveInteger(req.params.orderId);
+  if (!orderId) throw new HttpError(400, 'Mã đơn hàng không hợp lệ.');
+
+  const pool = await getPool();
+  const order = await inTransaction(pool, async (transaction) => {
+    const current = await new sql.Request(transaction)
+      .input('orderId', sql.Int, orderId)
+      .input('customerId', sql.Int, req.user.userId)
+      .query(`
+        SELECT OrderID, BranchID, Status
+        FROM dbo.Orders WITH (UPDLOCK, ROWLOCK)
+        WHERE OrderID = @orderId AND CustomerID = @customerId
+      `);
+    const row = current.recordset[0];
+    if (!row) throw new HttpError(404, 'Không tìm thấy đơn hàng.');
+    if (row.Status === 'Chờ xác nhận thanh toán') return row;
+    if (row.Status !== 'Chờ thanh toán') {
+      throw new HttpError(409, 'Đơn hàng không còn ở trạng thái chờ thanh toán.');
+    }
+
+    await new sql.Request(transaction)
+      .input('orderId', sql.Int, orderId)
+      .query("UPDATE dbo.Orders SET Status = N'Chờ xác nhận thanh toán' WHERE OrderID = @orderId");
+    return { ...row, Status: 'Chờ xác nhận thanh toán' };
+  });
+
+  emitOrderUpdate({
+    orderId,
+    status: order.Status,
+    branchId: order.BranchID,
+    customerId: req.user.userId,
+    action: 'PAYMENT_REPORTED',
+  });
+  res.json({ orderId, status: order.Status });
+}));
+
 app.post('/api/customer/orders', authenticateToken, authorizeRoles('CUSTOMER'), asyncRoute(async (req, res) => {
   const body = req.body || {};
   const branchId = positiveInteger(body.branchId);
   const deliveryAddress = typeof body.deliveryAddress === 'string' ? body.deliveryAddress.trim() : '';
   const deliveryArea = body.deliveryArea;
+  const hasLatitude = body.latitude !== undefined && body.latitude !== null;
+  const hasLongitude = body.longitude !== undefined && body.longitude !== null;
+  const latitude = hasLatitude ? body.latitude : null;
+  const longitude = hasLongitude ? body.longitude : null;
   const items = body.items;
   if (!branchId) throw new HttpError(400, 'Vui lòng chọn chi nhánh.');
   if (!deliveryAddress || deliveryAddress.length > 255) {
     throw new HttpError(400, 'Địa chỉ giao hàng là bắt buộc và tối đa 255 ký tự.');
   }
   if (!deliveryAreas.includes(deliveryArea)) throw new HttpError(400, 'Khu vực giao hàng không hợp lệ.');
+  if (hasLatitude !== hasLongitude || (hasLatitude && (
+    typeof latitude !== 'number' || !Number.isFinite(latitude) || latitude < -90 || latitude > 90
+    || typeof longitude !== 'number' || !Number.isFinite(longitude) || longitude < -180 || longitude > 180
+  ))) {
+    throw new HttpError(400, 'Tọa độ giao hàng không hợp lệ.');
+  }
   if (!Array.isArray(items) || items.length === 0 || items.length > 50) {
     throw new HttpError(400, 'Đơn hàng cần có từ 1 đến 50 món.');
   }
@@ -351,13 +433,15 @@ app.post('/api/customer/orders', authenticateToken, authorizeRoles('CUSTOMER'), 
       .input('customerId', sql.Int, req.user.userId)
       .input('deliveryAddress', sql.NVarChar(255), deliveryAddress)
       .input('deliveryArea', sql.NVarChar(100), deliveryArea)
+      .input('latitude', sql.Decimal(9, 6), latitude)
+      .input('longitude', sql.Decimal(9, 6), longitude)
       .input('totalAmount', sql.Decimal(18, 0), totalAmount)
       .query(`
         INSERT INTO dbo.Orders
-          (BranchID, TableID, CustomerID, DeliveryAddress, DeliveryArea, TotalAmount, Status)
+          (BranchID, TableID, CustomerID, DeliveryAddress, DeliveryArea, Latitude, Longitude, TotalAmount, Status)
         OUTPUT INSERTED.OrderID
         VALUES
-          (@branchId, NULL, @customerId, @deliveryAddress, @deliveryArea, @totalAmount, N'Chờ duyệt')
+          (@branchId, NULL, @customerId, @deliveryAddress, @deliveryArea, @latitude, @longitude, @totalAmount, N'Chờ thanh toán')
       `);
     const orderId = orderResult.recordset[0].OrderID;
 
@@ -378,12 +462,12 @@ app.post('/api/customer/orders', authenticateToken, authorizeRoles('CUSTOMER'), 
 
   emitOrderUpdate({
     orderId: result.orderId,
-    status: 'Chờ duyệt',
+    status: 'Chờ thanh toán',
     branchId,
     customerId: req.user.userId,
     action: 'ORDER_CREATED',
   });
-  res.status(201).json({ ...result, status: 'Chờ duyệt' });
+  res.status(201).json({ ...result, status: 'Chờ thanh toán' });
 }));
 
 app.get('/api/manager/orders', authenticateToken, authorizeRoles('MANAGER'), asyncRoute(async (req, res) => {
@@ -418,7 +502,9 @@ app.post('/api/manager/orders/:orderId/approve', authenticateToken, authorizeRol
       .query('SELECT OrderID, BranchID, CustomerID, Status FROM dbo.Orders WITH (UPDLOCK, ROWLOCK) WHERE OrderID = @orderId');
     const row = current.recordset[0];
     if (!row) throw new HttpError(404, 'Không tìm thấy đơn hàng.');
-    if (row.Status !== 'Chờ duyệt') throw new HttpError(409, 'Đơn hàng không còn ở trạng thái chờ duyệt.');
+    if (!['Chờ xác nhận thanh toán', 'Chờ duyệt'].includes(row.Status)) {
+      throw new HttpError(409, 'Khách hàng chưa báo đã chuyển khoản hoặc đơn không còn chờ xác nhận.');
+    }
 
     await new sql.Request(transaction)
       .input('orderId', sql.Int, orderId)
@@ -486,19 +572,19 @@ app.post('/api/manager/orders/:orderId/dispatch', authenticateToken, authorizeRo
     await new sql.Request(transaction)
       .input('orderId', sql.Int, orderId)
       .input('shipperId', sql.Int, shipperId)
-      .query("UPDATE dbo.Orders SET ShipperID = @shipperId, Status = N'Đang giao hàng' WHERE OrderID = @orderId");
+      .query("UPDATE dbo.Orders SET ShipperID = @shipperId, Status = N'Chờ Shipper xác nhận' WHERE OrderID = @orderId");
     return order;
   });
 
   emitOrderUpdate({
     orderId,
-    status: 'Đang giao hàng',
+    status: 'Chờ Shipper xác nhận',
     branchId: result.BranchID,
     customerId: result.CustomerID,
     shipperId,
     action: 'SHIPPER_ASSIGNED',
   });
-  res.json({ orderId, shipperId, status: 'Đang giao hàng' });
+  res.json({ orderId, shipperId, status: 'Chờ Shipper xác nhận' });
 }));
 
 app.get('/api/manager/stats', authenticateToken, authorizeRoles('MANAGER'), asyncRoute(async (_req, res) => {
@@ -540,10 +626,12 @@ app.get('/api/manager/tables', authenticateToken, authorizeRoles('MANAGER'), asy
 }));
 
 app.get('/api/chef/orders', authenticateToken, authorizeRoles('CHEF'), asyncRoute(async (req, res) => {
-  if (!req.user.branchId) throw new HttpError(403, 'Tài khoản đầu bếp chưa được gán chi nhánh.');
   const pool = await getPool();
+  const chef = await loadUser(req.user.userId, pool);
+  const branchId = positiveInteger(chef && chef.BranchID);
+  if (!branchId) throw new HttpError(403, 'Tài khoản đầu bếp chưa được gán chi nhánh.');
   const result = await pool.request()
-    .input('branchId', sql.Int, req.user.branchId)
+    .input('branchId', sql.Int, branchId)
     .query(`
       SELECT o.OrderID, o.BranchID, o.TableID, t.TableName, o.TotalAmount, o.Status,
         o.CreatedAt, o.DeliveryArea, o.DeliveryAddress
@@ -561,13 +649,16 @@ app.patch('/api/chef/orders/:orderId/status', authenticateToken, authorizeRoles(
   if (!orderId || !['Đang chế biến', 'Bếp hoàn thành'].includes(nextStatus)) {
     throw new HttpError(400, 'Mã đơn hàng hoặc trạng thái không hợp lệ.');
   }
-  if (!req.user.branchId) throw new HttpError(403, 'Tài khoản đầu bếp chưa được gán chi nhánh.');
+
+  const pool = await getPool();
+  const chef = await loadUser(req.user.userId, pool);
+  const branchId = positiveInteger(chef && chef.BranchID);
+  if (!branchId) throw new HttpError(403, 'Tài khoản đầu bếp chưa được gán chi nhánh.');
 
   const expectedStatus = nextStatus === 'Đang chế biến' ? 'Chờ chế biến' : 'Đang chế biến';
-  const pool = await getPool();
   const result = await pool.request()
     .input('orderId', sql.Int, orderId)
-    .input('branchId', sql.Int, req.user.branchId)
+    .input('branchId', sql.Int, branchId)
     .input('expectedStatus', sql.NVarChar(30), expectedStatus)
     .input('nextStatus', sql.NVarChar(30), nextStatus)
     .query(`
@@ -613,11 +704,11 @@ app.get('/api/shipper/orders', authenticateToken, authorizeRoles('SHIPPER'), asy
     .query(`
       SELECT o.OrderID, o.BranchID, b.BranchName, o.TotalAmount, o.Status, o.CreatedAt,
         o.DeliveryAddress, o.DeliveryArea, o.CustomerID, customer.FullName AS CustomerName,
-        customer.Phone AS CustomerPhone, o.ShipperID
+        customer.Phone AS CustomerPhone, o.ShipperID, o.Latitude, o.Longitude
       FROM dbo.Orders o
       JOIN dbo.Branches b ON b.BranchID = o.BranchID
       LEFT JOIN dbo.Users customer ON customer.UserID = o.CustomerID
-      WHERE (o.ShipperID = @shipperId AND o.Status = N'Đang giao hàng')
+      WHERE (o.ShipperID = @shipperId AND o.Status IN (N'Chờ Shipper xác nhận', N'Đang giao hàng'))
          OR (o.ShipperID IS NULL AND o.Status = N'Bếp hoàn thành' AND o.DeliveryArea = @deliveryArea)
       ORDER BY o.CreatedAt
     `);
@@ -640,8 +731,11 @@ app.post('/api/shipper/orders/:orderId/claim', authenticateToken, authorizeRoles
         UPDATE dbo.Orders
         SET ShipperID = @shipperId, Status = N'Đang giao hàng'
         OUTPUT INSERTED.OrderID, INSERTED.BranchID, INSERTED.CustomerID
-        WHERE OrderID = @orderId AND ShipperID IS NULL
-          AND Status = N'Bếp hoàn thành' AND DeliveryArea = @deliveryArea
+        WHERE OrderID = @orderId
+          AND (
+            (ShipperID IS NULL AND Status = N'Bếp hoàn thành' AND DeliveryArea = @deliveryArea)
+            OR (ShipperID = @shipperId AND Status = N'Chờ Shipper xác nhận')
+          )
       `);
     if (!update.recordset.length) throw new HttpError(409, 'Đơn không còn khả dụng trong khu vực của bạn.');
     return update.recordset[0];

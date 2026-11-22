@@ -71,7 +71,7 @@ function ShipperPage() {
     try {
       if (action === 'claim') {
         await api.post(`/shipper/orders/${order.OrderID}/claim`);
-        setNotice(`Bạn đã nhận giao đơn #${order.OrderID}.`);
+        setNotice(`Bạn đã xác nhận nhận và bắt đầu giao đơn #${order.OrderID}.`);
       } else {
         await api.patch(`/shipper/orders/${order.OrderID}/complete`);
         setNotice(`Đã xác nhận giao xong đơn #${order.OrderID}.`);
@@ -114,14 +114,19 @@ function ShipperPage() {
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
             <h2 className="text-xl font-bold text-slate-800">Đơn cần giao</h2>
-            <p className="text-sm text-slate-500">Đơn bếp hoàn thành trong khu vực và đơn đã được giao cho bạn.</p>
+            <p className="text-sm text-slate-500">Đơn bếp hoàn thành trong khu vực và đơn đang chờ bạn xác nhận nhận giao.</p>
           </div>
           <span className="rounded-full bg-indigo-50 px-3 py-1 text-sm font-semibold text-indigo-700">{orders.length} đơn</span>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
           {orders.map((order) => {
-            const canClaim = order.Status === 'Bếp hoàn thành' && !order.ShipperID;
+            const canAccept = (order.Status === 'Bếp hoàn thành' && !order.ShipperID)
+              || (order.Status === 'Chờ Shipper xác nhận' && order.ShipperID === user?.UserID);
+            const isInTransit = order.Status === 'Đang giao hàng' && order.ShipperID === user?.UserID;
+            const hasCoordinates = order.Latitude != null && order.Longitude != null
+              && Number.isFinite(Number(order.Latitude))
+              && Number.isFinite(Number(order.Longitude));
             return (
               <article key={order.OrderID} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex items-start justify-between gap-3">
@@ -135,23 +140,35 @@ function ShipperPage() {
                   <p><span className="text-slate-500">Địa chỉ:</span> <strong>{order.DeliveryAddress}</strong></p>
                   <p><span className="text-slate-500">Khách hàng:</span> {order.CustomerName || '—'}{order.CustomerPhone ? ` · ${order.CustomerPhone}` : ''}</p>
                   <p><span className="text-slate-500">Khu vực:</span> {order.DeliveryArea}</p>
+                  {hasCoordinates && (
+                    <a
+                      href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${order.Latitude},${order.Longitude}`)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1 inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:underline"
+                    >
+                      <MapPin className="h-3.5 w-3.5" />
+                      Mở Google Maps chỉ đường
+                    </a>
+                  )}
                   <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
                     {(order.items || []).map((item) => <li key={item.OrderItemID}>{item.ProductName} × {item.Quantity}</li>)}
                   </ul>
                 </div>
-                {canClaim ? (
+                {canAccept ? (
                   <button type="button" disabled={busyOrder === order.OrderID}
                     onClick={() => updateOrder(order, 'claim')}
                     className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60">
-                    <Truck className="h-4 w-4" /> Nhận giao đơn
+                    <Truck className="h-4 w-4" />
+                    {order.Status === 'Chờ Shipper xác nhận' ? 'Xác nhận nhận đơn & bắt đầu giao' : 'Nhận giao đơn'}
                   </button>
-                ) : (
+                ) : isInTransit ? (
                   <button type="button" disabled={busyOrder === order.OrderID}
                     onClick={() => updateOrder(order, 'complete')}
                     className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60">
                     <PackageCheck className="h-4 w-4" /> Xác nhận đã giao
                   </button>
-                )}
+                ) : null}
               </article>
             );
           })}
