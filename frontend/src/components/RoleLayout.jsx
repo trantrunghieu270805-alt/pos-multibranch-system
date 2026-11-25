@@ -2,6 +2,7 @@ import { LogOut } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 
 const roleLabels = {
+  OWNER: 'Chủ doanh nghiệp',
   CUSTOMER: 'Khách hàng',
   MANAGER: 'Quản lý / điều phối',
   CHEF: 'Đầu bếp - KDS',

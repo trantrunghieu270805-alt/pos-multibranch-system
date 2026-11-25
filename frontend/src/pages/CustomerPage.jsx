@@ -89,9 +89,10 @@ function CustomerPage() {
   );
 
   const paymentQrUrlFor = (order) => {
-    const bankId = import.meta.env.VITE_BANK_ID;
-    const accountNo = import.meta.env.VITE_ACCOUNT_NO;
-    const accountName = import.meta.env.VITE_ACCOUNT_NAME;
+    const branch = branches.find((item) => item.BranchID === order.BranchID);
+    const bankId = branch?.BankID || import.meta.env.VITE_BANK_ID;
+    const accountNo = branch?.AccountNo || import.meta.env.VITE_ACCOUNT_NO;
+    const accountName = branch?.AccountName || import.meta.env.VITE_ACCOUNT_NAME;
     if (!bankId || !accountNo || !accountName) return '';
 
     const params = new URLSearchParams({
@@ -140,6 +141,7 @@ function CustomerPage() {
       });
       const newOrder = {
         OrderID: data.orderId,
+        BranchID: Number(branchId),
         BranchName: branches.find((branch) => String(branch.BranchID) === branchId)?.BranchName || '',
         CreatedAt: new Date().toISOString(),
         Status: data.status,

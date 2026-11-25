@@ -7,7 +7,7 @@ const http = require('http');
 const jwt = require('jsonwebtoken');
 const { Server } = require('socket.io');
 const { getPool, sql } = require('./config/db');
-const { authenticateToken, authorizeRoles } = require('./middleware/auth');
+const { authenticateToken, authorizeRoles, requireRole } = require('./middleware/auth');
 
 if (!process.env.JWT_SECRET || Buffer.byteLength(process.env.JWT_SECRET) < 32) {
   throw new Error('JWT_SECRET must be set to a random value of at least 32 bytes.');
@@ -19,7 +19,7 @@ const allowedOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 const io = new Server(server, {
   cors: {
     origin: allowedOrigin,
-    methods: ['GET', 'POST', 'PATCH'],
+    methods: ['GET', 'POST', 'PATCH', 'DELETE'],
   },
 });
 
@@ -36,6 +36,8 @@ const deliveryAreas = [
   'Bình Tân',
 ];
 const passwordPattern = /^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+const userRoles = ['OWNER', 'CUSTOMER', 'MANAGER', 'CHEF', 'SHIPPER'];
+const employeeRoles = ['MANAGER', 'CHEF', 'SHIPPER'];
 const workflowStatuses = [
   'Chờ thanh toán',
   'Chờ xác nhận thanh toán',
@@ -64,6 +66,16 @@ function positiveInteger(value) {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+function parseYear(value) {
+  const year = Number(value);
+  return Number.isInteger(year) && year >= 2000 && year <= 2100 ? year : null;
+}
+
+function parseBranchFilter(value) {
+  if (value === undefined || value === 'all') return null;
+  return positiveInteger(value);
+}
+
 function publicUser(user) {
   return {
     UserID: user.UserID,
@@ -73,6 +85,7 @@ function publicUser(user) {
     BranchID: user.BranchID,
     DeliveryArea: user.DeliveryArea,
     Phone: user.Phone,
+    IsActive: user.IsActive,
   };
 }
 
@@ -89,7 +102,7 @@ function createToken(user) {
 }
 
 function emitOrderUpdate({ orderId, status, branchId, customerId, shipperId, deliveryArea, action }) {
-  let recipients = io.to('role:MANAGER');
+  let recipients = io.to('role:MANAGER').to('role:OWNER');
   if (branchId) recipients = recipients.to(`branch:${branchId}`);
   if (customerId) recipients = recipients.to(`user:${customerId}`);
   if (shipperId) recipients = recipients.to(`user:${shipperId}`);
@@ -120,7 +133,7 @@ async function loadUser(userId, executor) {
   const result = await new sql.Request(executor)
     .input('userId', sql.Int, userId)
     .query(`
-      SELECT UserID, FullName, Username, Role, BranchID, DeliveryArea, Phone
+      SELECT UserID, FullName, Username, Role, BranchID, DeliveryArea, Phone, IsActive
       FROM dbo.Users
       WHERE UserID = @userId
     `);
@@ -146,21 +159,32 @@ app.use(cors({ origin: allowedOrigin }));
 app.use(express.json({ limit: '1mb' }));
 
 io.use((socket, next) => {
+  let payload;
   try {
     const token = socket.handshake.auth && socket.handshake.auth.token;
     if (!token) return next(new Error('Authentication required.'));
-    const payload = jwt.verify(token, process.env.JWT_SECRET, {
+    payload = jwt.verify(token, process.env.JWT_SECRET, {
       issuer: 'pos-multibranch-system',
     });
-    const userId = positiveInteger(payload.sub);
-    if (!userId || !['CUSTOMER', 'MANAGER', 'CHEF', 'SHIPPER'].includes(payload.role)) {
+    if (!positiveInteger(payload.sub) || !userRoles.includes(payload.role)) {
       return next(new Error('Invalid authentication token.'));
     }
-    socket.user = { userId, role: payload.role, branchId: payload.branchId || null };
-    next();
   } catch {
-    next(new Error('Invalid authentication token.'));
+    return next(new Error('Invalid authentication token.'));
   }
+
+  const userId = positiveInteger(payload.sub);
+  getPool()
+    .then((pool) => loadUser(userId, pool))
+    .then((user) => {
+      if (!user || !user.IsActive || !userRoles.includes(user.Role)) {
+        next(new Error('Account is inactive.'));
+        return;
+      }
+      socket.user = { userId, role: user.Role, branchId: user.BranchID };
+      next();
+    })
+    .catch(next);
 });
 
 io.on('connection', (socket) => {
@@ -261,7 +285,7 @@ app.post('/api/auth/register', asyncRoute(async (req, res) => {
     .query(`
       INSERT INTO dbo.Users (FullName, Username, PasswordHash, Role, Phone)
       OUTPUT INSERTED.UserID, INSERTED.FullName, INSERTED.Username, INSERTED.Role,
-        INSERTED.BranchID, INSERTED.DeliveryArea, INSERTED.Phone
+        INSERTED.BranchID, INSERTED.DeliveryArea, INSERTED.Phone, INSERTED.IsActive
       VALUES (@fullName, @username, @passwordHash, N'CUSTOMER', @phone)
     `);
   res.status(201).json({ user: publicUser(result.recordset[0]) });
@@ -277,7 +301,7 @@ app.post('/api/auth/login', asyncRoute(async (req, res) => {
   const result = await pool.request()
     .input('username', sql.NVarChar(80), username)
     .query(`
-      SELECT UserID, FullName, Username, PasswordHash, Role, BranchID, DeliveryArea, Phone
+      SELECT UserID, FullName, Username, PasswordHash, Role, BranchID, DeliveryArea, Phone, IsActive
       FROM dbo.Users
       WHERE Username = @username
     `);
@@ -285,6 +309,7 @@ app.post('/api/auth/login', asyncRoute(async (req, res) => {
   if (!user || !(await bcrypt.compare(password, user.PasswordHash))) {
     throw new HttpError(401, 'Tên đăng nhập hoặc mật khẩu không chính xác.');
   }
+  if (!user.IsActive) throw new HttpError(403, 'Tài khoản đã bị khóa. Vui lòng liên hệ Chủ doanh nghiệp.');
   res.json({ token: createToken(user), user: publicUser(user) });
 }));
 
@@ -298,12 +323,336 @@ app.get('/api/auth/me', authenticateToken, asyncRoute(async (req, res) => {
 app.get('/api/branches', authenticateToken, asyncRoute(async (_req, res) => {
   const pool = await getPool();
   const result = await pool.request().query(`
-    SELECT BranchID, BranchName, Address
+    SELECT BranchID, BranchName, Address, BankID, AccountNo, AccountName
     FROM dbo.Branches
     WHERE IsActive = 1
     ORDER BY BranchName
   `);
   res.json(result.recordset);
+}));
+
+app.get('/api/owner/users', authenticateToken, requireRole('OWNER'), asyncRoute(async (req, res) => {
+  const role = req.query.role || null;
+  const branchFilter = parseBranchFilter(req.query.branchId);
+  if (role && !userRoles.includes(role)) throw new HttpError(400, 'Vai trò lọc không hợp lệ.');
+  if (req.query.branchId !== undefined && req.query.branchId !== 'all' && !branchFilter) {
+    throw new HttpError(400, 'Chi nhánh lọc không hợp lệ.');
+  }
+
+  const pool = await getPool();
+  const result = await pool.request()
+    .input('role', sql.NVarChar(20), role)
+    .input('branchId', sql.Int, branchFilter)
+    .query(`
+      SELECT u.UserID, u.FullName, u.Username, u.Role, u.BranchID, b.BranchName,
+        u.DeliveryArea, u.Phone, u.IsActive, u.CreatedAt
+      FROM dbo.Users u
+      LEFT JOIN dbo.Branches b ON b.BranchID = u.BranchID
+      WHERE (@role IS NULL OR u.Role = @role)
+        AND (@branchId IS NULL OR u.BranchID = @branchId)
+      ORDER BY u.Role, u.FullName
+    `);
+  res.json(result.recordset);
+}));
+
+app.post('/api/owner/users', authenticateToken, requireRole('OWNER'), asyncRoute(async (req, res) => {
+  const body = req.body || {};
+  const fullName = typeof body.fullName === 'string' ? body.fullName.trim() : '';
+  const username = typeof body.username === 'string' ? body.username.trim() : '';
+  const password = typeof body.password === 'string' ? body.password : '';
+  const phone = typeof body.phone === 'string' ? body.phone.trim() : null;
+  const role = body.role;
+  const branchId = body.branchId == null || body.branchId === '' ? null : positiveInteger(body.branchId);
+  const deliveryArea = body.deliveryArea || null;
+
+  if (fullName.length < 2 || fullName.length > 120 || username.length < 3 || username.length > 80) {
+    throw new HttpError(400, 'Họ tên phải từ 2-120 ký tự và tên đăng nhập từ 3-80 ký tự.');
+  }
+  if (!passwordPattern.test(password)) {
+    throw new HttpError(400, 'Mật khẩu cần ít nhất 8 ký tự, gồm chữ hoa, chữ số và ký tự đặc biệt (@$!%*?&).');
+  }
+  if (!employeeRoles.includes(role)) {
+    throw new HttpError(400, 'Chỉ có thể tạo tài khoản Quản lý, Đầu bếp hoặc Shipper.');
+  }
+  if (phone && phone.length > 30) throw new HttpError(400, 'Số điện thoại không hợp lệ.');
+  if (body.branchId != null && body.branchId !== '' && !branchId) {
+    throw new HttpError(400, 'Chi nhánh không hợp lệ.');
+  }
+  if (role === 'CHEF' && !branchId) throw new HttpError(400, 'Đầu bếp phải được gán chi nhánh.');
+  if (role === 'SHIPPER' && !deliveryAreas.includes(deliveryArea)) {
+    throw new HttpError(400, 'Shipper phải được gán khu vực giao hàng hợp lệ.');
+  }
+
+  const pool = await getPool();
+  if (branchId) {
+    const branch = await pool.request()
+      .input('branchId', sql.Int, branchId)
+      .query('SELECT BranchID FROM dbo.Branches WHERE BranchID = @branchId AND IsActive = 1');
+    if (!branch.recordset.length) throw new HttpError(400, 'Không tìm thấy chi nhánh đang hoạt động.');
+  }
+  const existing = await pool.request()
+    .input('username', sql.NVarChar(80), username)
+    .query('SELECT UserID FROM dbo.Users WHERE Username = @username');
+  if (existing.recordset.length) throw new HttpError(409, 'Tên đăng nhập đã được sử dụng.');
+
+  const passwordHash = await bcrypt.hash(password, 12);
+  const result = await pool.request()
+    .input('fullName', sql.NVarChar(120), fullName)
+    .input('username', sql.NVarChar(80), username)
+    .input('passwordHash', sql.NVarChar(100), passwordHash)
+    .input('role', sql.NVarChar(20), role)
+    .input('branchId', sql.Int, branchId)
+    .input('deliveryArea', sql.NVarChar(100), role === 'SHIPPER' ? deliveryArea : null)
+    .input('phone', sql.NVarChar(30), phone || null)
+    .query(`
+      INSERT INTO dbo.Users (FullName, Username, PasswordHash, Role, BranchID, DeliveryArea, Phone)
+      OUTPUT INSERTED.UserID, INSERTED.FullName, INSERTED.Username, INSERTED.Role,
+        INSERTED.BranchID, INSERTED.DeliveryArea, INSERTED.Phone, INSERTED.IsActive
+      VALUES (@fullName, @username, @passwordHash, @role, @branchId, @deliveryArea, @phone)
+    `);
+  res.status(201).json({ user: publicUser(result.recordset[0]) });
+}));
+
+app.patch('/api/owner/users/:userId', authenticateToken, requireRole('OWNER'), asyncRoute(async (req, res) => {
+  const userId = positiveInteger(req.params.userId);
+  const body = req.body || {};
+  const has = (key) => Object.prototype.hasOwnProperty.call(body, key);
+  if (!userId) throw new HttpError(400, 'Mã tài khoản không hợp lệ.');
+  if (!['Role', 'BranchID', 'DeliveryArea', 'IsActive'].some(has)) {
+    throw new HttpError(400, 'Không có thông tin cần cập nhật.');
+  }
+  if (has('Role') && !userRoles.includes(body.Role)) throw new HttpError(400, 'Vai trò không hợp lệ.');
+  if (has('IsActive') && typeof body.IsActive !== 'boolean') {
+    throw new HttpError(400, 'Trạng thái tài khoản không hợp lệ.');
+  }
+
+  const pool = await getPool();
+  const updatedUser = await inTransaction(pool, async (transaction) => {
+    const result = await new sql.Request(transaction)
+      .input('userId', sql.Int, userId)
+      .query('SELECT UserID, Role, BranchID, DeliveryArea, IsActive FROM dbo.Users WITH (UPDLOCK, HOLDLOCK) WHERE UserID = @userId');
+    const current = result.recordset[0];
+    if (!current) throw new HttpError(404, 'Không tìm thấy tài khoản.');
+
+    const role = has('Role') ? body.Role : current.Role;
+    const requestedBranch = has('BranchID') ? body.BranchID : current.BranchID;
+    const requestedBranchId = requestedBranch == null || requestedBranch === '' ? null : positiveInteger(requestedBranch);
+    if (requestedBranch != null && requestedBranch !== '' && !requestedBranchId) {
+      throw new HttpError(400, 'Chi nhánh không hợp lệ.');
+    }
+    const branchId = role === 'CUSTOMER' || role === 'OWNER' ? null : requestedBranchId;
+    if (has('BranchID') && (role === 'CUSTOMER' || role === 'OWNER') && requestedBranchId) {
+      throw new HttpError(400, 'Vai trò này không thể được gán chi nhánh.');
+    }
+    const requestedArea = has('DeliveryArea') ? body.DeliveryArea : current.DeliveryArea;
+    const deliveryArea = role === 'SHIPPER' ? requestedArea : null;
+    const isActive = has('IsActive') ? body.IsActive : current.IsActive;
+    if (role === 'CHEF' && !branchId) throw new HttpError(400, 'Đầu bếp phải được gán chi nhánh.');
+    if (role === 'SHIPPER' && !deliveryAreas.includes(deliveryArea)) {
+      throw new HttpError(400, 'Shipper phải được gán khu vực giao hàng hợp lệ.');
+    }
+    if (userId === req.user.userId && (!isActive || role !== 'OWNER')) {
+      throw new HttpError(400, 'Bạn không thể tự khóa hoặc đổi vai trò tài khoản của mình.');
+    }
+    if (branchId) {
+      const branch = await new sql.Request(transaction)
+        .input('branchId', sql.Int, branchId)
+        .query('SELECT BranchID FROM dbo.Branches WHERE BranchID = @branchId AND IsActive = 1');
+      if (!branch.recordset.length) throw new HttpError(400, 'Không tìm thấy chi nhánh đang hoạt động.');
+    }
+    if (current.Role === 'OWNER' && current.IsActive && (!isActive || role !== 'OWNER')) {
+      const activeOwners = await new sql.Request(transaction)
+        .query("SELECT UserID FROM dbo.Users WITH (UPDLOCK, HOLDLOCK) WHERE Role = N'OWNER' AND IsActive = 1");
+      if (activeOwners.recordset.length <= 1) {
+        throw new HttpError(409, 'Không thể khóa hoặc đổi vai trò Chủ doanh nghiệp đang hoạt động cuối cùng.');
+      }
+    }
+
+    const updated = await new sql.Request(transaction)
+      .input('userId', sql.Int, userId)
+      .input('role', sql.NVarChar(20), role)
+      .input('branchId', sql.Int, role === 'CUSTOMER' || role === 'OWNER' ? null : branchId)
+      .input('deliveryArea', sql.NVarChar(100), deliveryArea)
+      .input('isActive', sql.Bit, isActive)
+      .query(`
+        UPDATE dbo.Users
+        SET Role = @role, BranchID = @branchId, DeliveryArea = @deliveryArea, IsActive = @isActive
+        OUTPUT INSERTED.UserID, INSERTED.FullName, INSERTED.Username, INSERTED.Role,
+          INSERTED.BranchID, INSERTED.DeliveryArea, INSERTED.Phone, INSERTED.IsActive
+        WHERE UserID = @userId
+      `);
+    return updated.recordset[0];
+  });
+  io.in(`user:${userId}`).disconnectSockets(true);
+  res.json({ user: publicUser(updatedUser) });
+}));
+
+app.delete('/api/owner/users/:userId', authenticateToken, requireRole('OWNER'), asyncRoute(async (req, res) => {
+  const userId = positiveInteger(req.params.userId);
+  if (!userId) throw new HttpError(400, 'Mã tài khoản không hợp lệ.');
+  if (userId === req.user.userId) throw new HttpError(400, 'Bạn không thể xóa tài khoản của mình.');
+
+  const pool = await getPool();
+  await inTransaction(pool, async (transaction) => {
+    const result = await new sql.Request(transaction)
+      .input('userId', sql.Int, userId)
+      .query('SELECT UserID, Role, IsActive FROM dbo.Users WITH (UPDLOCK, HOLDLOCK) WHERE UserID = @userId');
+    const target = result.recordset[0];
+    if (!target) throw new HttpError(404, 'Không tìm thấy tài khoản.');
+
+    if (target.Role === 'OWNER' && target.IsActive) {
+      const activeOwners = await new sql.Request(transaction)
+        .query("SELECT UserID FROM dbo.Users WITH (UPDLOCK, HOLDLOCK) WHERE Role = N'OWNER' AND IsActive = 1");
+      if (activeOwners.recordset.length <= 1) {
+        throw new HttpError(409, 'Không thể xóa Chủ doanh nghiệp đang hoạt động cuối cùng.');
+      }
+    }
+
+    const references = await new sql.Request(transaction)
+      .input('userId', sql.Int, userId)
+      .query('SELECT TOP (1) OrderID FROM dbo.Orders WHERE CustomerID = @userId OR ShipperID = @userId');
+    if (references.recordset.length) {
+      throw new HttpError(409, 'Tài khoản đã có đơn hàng liên quan. Hãy khóa tài khoản thay vì xóa.');
+    }
+
+    await new sql.Request(transaction)
+      .input('userId', sql.Int, userId)
+      .query('DELETE FROM dbo.Users WHERE UserID = @userId');
+  });
+  io.in(`user:${userId}`).disconnectSockets(true);
+  res.status(204).end();
+}));
+
+app.get('/api/owner/branches', authenticateToken, requireRole('OWNER'), asyncRoute(async (_req, res) => {
+  const pool = await getPool();
+  const result = await pool.request().query(`
+    SELECT b.BranchID, b.BranchName, b.Address, b.IsActive, b.BankID, b.AccountNo, b.AccountName,
+      COUNT(o.OrderID) AS OrderCount,
+      ISNULL(SUM(o.TotalAmount), 0) AS TotalRevenue,
+      ISNULL(SUM(CASE WHEN o.Status IN (
+        N'Chờ chế biến', N'Đang chế biến', N'Bếp hoàn thành',
+        N'Chờ Shipper xác nhận', N'Đang giao hàng', N'Hoàn tất'
+      ) THEN o.TotalAmount ELSE 0 END), 0) AS PaidRevenue
+    FROM dbo.Branches b
+    LEFT JOIN dbo.Orders o ON o.BranchID = b.BranchID
+    GROUP BY b.BranchID, b.BranchName, b.Address, b.IsActive, b.BankID, b.AccountNo, b.AccountName
+    ORDER BY b.BranchName
+  `);
+  res.json(result.recordset);
+}));
+
+app.patch('/api/owner/branches/:branchId', authenticateToken, requireRole('OWNER'), asyncRoute(async (req, res) => {
+  const branchId = positiveInteger(req.params.branchId);
+  const body = req.body || {};
+  const fields = ['BankID', 'AccountNo', 'AccountName'];
+  if (!branchId) throw new HttpError(400, 'Mã chi nhánh không hợp lệ.');
+  if (!fields.some((field) => Object.prototype.hasOwnProperty.call(body, field))) {
+    throw new HttpError(400, 'Không có thông tin ngân hàng cần cập nhật.');
+  }
+
+  const values = fields.map((field) => {
+    const value = body[field] == null ? '' : String(body[field]).trim();
+    const maxLength = field === 'AccountName' ? 120 : 50;
+    if (value.length > maxLength) throw new HttpError(400, `Thông tin ${field} vượt quá độ dài cho phép.`);
+    return value || null;
+  });
+  if (values.some(Boolean) && values.some((value) => !value)) {
+    throw new HttpError(400, 'Hãy nhập đầy đủ ngân hàng, số tài khoản và tên chủ tài khoản.');
+  }
+
+  const pool = await getPool();
+  const result = await pool.request()
+    .input('branchId', sql.Int, branchId)
+    .input('bankId', sql.NVarChar(50), values[0])
+    .input('accountNo', sql.NVarChar(50), values[1])
+    .input('accountName', sql.NVarChar(120), values[2])
+    .query(`
+      UPDATE dbo.Branches
+      SET BankID = @bankId, AccountNo = @accountNo, AccountName = @accountName
+      OUTPUT INSERTED.BranchID, INSERTED.BranchName, INSERTED.BankID, INSERTED.AccountNo, INSERTED.AccountName
+      WHERE BranchID = @branchId
+    `);
+  if (!result.recordset.length) throw new HttpError(404, 'Không tìm thấy chi nhánh.');
+  res.json({ branch: result.recordset[0] });
+}));
+
+app.get('/api/owner/analytics/monthly', authenticateToken, requireRole('OWNER'), asyncRoute(async (req, res) => {
+  const year = parseYear(req.query.year);
+  const branchFilter = parseBranchFilter(req.query.branchId);
+  if (!year) throw new HttpError(400, 'Năm phải nằm trong khoảng 2000-2100.');
+  if (req.query.branchId !== undefined && req.query.branchId !== 'all' && !branchFilter) {
+    throw new HttpError(400, 'Chi nhánh lọc không hợp lệ.');
+  }
+
+  const pool = await getPool();
+  const result = await pool.request()
+    .input('year', sql.Int, year)
+    .input('branchId', sql.Int, branchFilter)
+    .query(`
+      WITH MonthNumbers AS (
+        SELECT MonthNumber
+        FROM (VALUES (1), (2), (3), (4), (5), (6), (7), (8), (9), (10), (11), (12)) months(MonthNumber)
+      )
+      SELECT months.MonthNumber AS Month,
+        ISNULL(SUM(o.TotalAmount), 0) AS TotalRevenue,
+        ISNULL(SUM(CASE WHEN o.Status IN (
+          N'Chờ chế biến', N'Đang chế biến', N'Bếp hoàn thành',
+          N'Chờ Shipper xác nhận', N'Đang giao hàng', N'Hoàn tất'
+        ) THEN o.TotalAmount ELSE 0 END), 0) AS PaidRevenue,
+        COUNT(o.OrderID) AS OrderCount
+      FROM MonthNumbers months
+      LEFT JOIN dbo.Orders o
+        ON YEAR(o.CreatedAt) = @year
+        AND MONTH(o.CreatedAt) = months.MonthNumber
+        AND (@branchId IS NULL OR o.BranchID = @branchId)
+      GROUP BY months.MonthNumber
+      ORDER BY months.MonthNumber
+    `);
+  const months = result.recordset;
+  const summary = months.reduce((total, month) => ({
+    TotalRevenue: total.TotalRevenue + Number(month.TotalRevenue),
+    PaidRevenue: total.PaidRevenue + Number(month.PaidRevenue),
+    OrderCount: total.OrderCount + Number(month.OrderCount),
+  }), { TotalRevenue: 0, PaidRevenue: 0, OrderCount: 0 });
+  res.json({ year, branchId: req.query.branchId || 'all', summary, months });
+}));
+
+app.get('/api/owner/reports/revenue', authenticateToken, requireRole('OWNER'), asyncRoute(async (req, res) => {
+  const year = parseYear(req.query.year);
+  const monthQuery = req.query.month === undefined ? 'all' : req.query.month;
+  const month = monthQuery === 'all' ? null : positiveInteger(monthQuery);
+  if (!year) throw new HttpError(400, 'Năm phải nằm trong khoảng 2000-2100.');
+  if (monthQuery !== 'all' && (!month || month > 12)) throw new HttpError(400, 'Tháng không hợp lệ.');
+
+  const pool = await getPool();
+  const result = await pool.request()
+    .input('year', sql.Int, year)
+    .input('month', sql.Int, month)
+    .query(`
+      SELECT b.BranchID, b.BranchName, b.Address,
+        SUM(CASE WHEN o.Status = N'Hoàn tất' THEN 1 ELSE 0 END) AS CompletedOrderCount,
+        SUM(CASE WHEN o.OrderID IS NOT NULL AND o.Status <> N'Hoàn tất' THEN 1 ELSE 0 END) AS ProcessingOrderCount,
+        ISNULL(SUM(CASE WHEN o.PaymentMethod = N'CASH' AND o.Status IN (
+          N'Chờ chế biến', N'Đang chế biến', N'Bếp hoàn thành',
+          N'Chờ Shipper xác nhận', N'Đang giao hàng', N'Hoàn tất'
+        ) THEN o.TotalAmount ELSE 0 END), 0) AS CashRevenue,
+        ISNULL(SUM(CASE WHEN o.PaymentMethod = N'VIETQR' AND o.Status IN (
+          N'Chờ chế biến', N'Đang chế biến', N'Bếp hoàn thành',
+          N'Chờ Shipper xác nhận', N'Đang giao hàng', N'Hoàn tất'
+        ) THEN o.TotalAmount ELSE 0 END), 0) AS VietQrRevenue,
+        ISNULL(SUM(CASE WHEN o.Status IN (
+          N'Chờ chế biến', N'Đang chế biến', N'Bếp hoàn thành',
+          N'Chờ Shipper xác nhận', N'Đang giao hàng', N'Hoàn tất'
+        ) THEN o.TotalAmount ELSE 0 END), 0) AS TotalRevenue
+      FROM dbo.Branches b
+      LEFT JOIN dbo.Orders o
+        ON o.BranchID = b.BranchID
+        AND YEAR(o.CreatedAt) = @year
+        AND (@month IS NULL OR MONTH(o.CreatedAt) = @month)
+      GROUP BY b.BranchID, b.BranchName, b.Address
+      ORDER BY b.BranchName
+    `);
+  res.json({ year, month: month || 'all', branches: result.recordset });
 }));
 
 app.get('/api/menu', authenticateToken, authorizeRoles('CUSTOMER', 'MANAGER', 'CHEF'), asyncRoute(async (_req, res) => {
@@ -438,10 +787,10 @@ app.post('/api/customer/orders', authenticateToken, authorizeRoles('CUSTOMER'), 
       .input('totalAmount', sql.Decimal(18, 0), totalAmount)
       .query(`
         INSERT INTO dbo.Orders
-          (BranchID, TableID, CustomerID, DeliveryAddress, DeliveryArea, Latitude, Longitude, TotalAmount, Status)
+          (BranchID, TableID, CustomerID, DeliveryAddress, DeliveryArea, Latitude, Longitude, TotalAmount, Status, PaymentMethod)
         OUTPUT INSERTED.OrderID
         VALUES
-          (@branchId, NULL, @customerId, @deliveryAddress, @deliveryArea, @latitude, @longitude, @totalAmount, N'Chờ thanh toán')
+          (@branchId, NULL, @customerId, @deliveryAddress, @deliveryArea, @latitude, @longitude, @totalAmount, N'Chờ thanh toán', N'VIETQR')
       `);
     const orderId = orderResult.recordset[0].OrderID;
 

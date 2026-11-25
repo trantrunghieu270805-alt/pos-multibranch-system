@@ -14,6 +14,7 @@ export const deliveryAreas = [
 export const defaultDeliveryArea = 'Quận 1';
 
 export const rolePaths = {
+  OWNER: '/owner',
   CUSTOMER: '/customer',
   MANAGER: '/manager',
   CHEF: '/chef',
