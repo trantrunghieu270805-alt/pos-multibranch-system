@@ -1,0 +1,77 @@
+﻿WBS,Level,NodeType,ScheduleID,TaskName,Owner,Predecessors,DurationDays,EffortPersonDays
+1,0,Summary,,Hệ thống Quản lý Bán hàng & Đặt món đa chi nhánh (MultiBranchPOS),Project Manager,,,
+1.1,1,ControlAccount,,Quản lý dự án,Project Manager,,,
+1.1.1,2,WorkPackage,A,"Khởi tạo và lập kế hoạch dự án (Charter, Scope Baseline)",Project Manager,,3,3.0
+1.1.2,2,WorkPackage,,Giám sát tiến độ và chi phí (xuyên suốt),Project Manager,,0,5.0
+1.1.3,2,WorkPackage,,Kiểm soát thay đổi phạm vi (Change Control),Project Manager,,0,2.0
+1.1.4,2,WorkPackage,,Họp trạng thái và báo cáo Chủ doanh nghiệp (Sponsor),Project Manager,,0,3.0
+1.2,1,ControlAccount,,Phân tích và thiết kế,Business Analyst,,,
+1.2.1,2,ControlAccount,,Khảo sát và phân tích nghiệp vụ,Business Analyst,,,
+1.2.1.1,3,WorkPackage,B,"Workshop nghiệp vụ với Chủ DN, Quản lý chi nhánh, Bếp và Shipper nội bộ",Business Analyst,A,2,3.0
+1.2.1.2,3,WorkPackage,C,Lập sơ đồ quy trình AS-IS / TO-BE đa chi nhánh,Business Analyst,B,2,2.0
+1.2.1.3,3,WorkPackage,D,Process map luồng Đặt món – Duyệt đơn – Bếp KDS – Shipper giao hàng,Business Analyst,C,2,2.0
+1.2.1.4,3,WorkPackage,E,"Process map Quản trị thực đơn, Phân quyền RBAC, VietQR và Báo cáo doanh thu",Business Analyst,C,2,2.0
+1.2.2,2,ControlAccount,,Đặc tả yêu cầu và backlog,Business Analyst,,,
+1.2.2.1,3,WorkPackage,F,"User stories / SRS phân hệ Khách hàng (Đặt món, GPS Leaflet, VietQR, Chatbot AI)",Business Analyst,D,3,3.0
+1.2.2.2,3,WorkPackage,G,"User stories / SRS phân hệ Quản lý chi nhánh, Bếp KDS và Shipper nội bộ",Business Analyst,D,3,3.0
+1.2.2.3,3,WorkPackage,H,"User stories / SRS phân hệ Chủ doanh nghiệp (User, Thực đơn, Biểu đồ, Excel)",Business Analyst,E,2,2.0
+1.2.2.4,3,WorkPackage,I,Workshop tiêu chí nghiệm thu (AC) và chốt backlog với Product Owner,Business Analyst,F;G;H,2,2.0
+1.2.3,2,ControlAccount,,Thiết kế kỹ thuật và nền tảng,Tech Lead,,,
+1.2.3.1,3,WorkPackage,J,"Thiết kế cơ sở dữ liệu SQL Server (ERD, chuẩn Unicode NVARCHAR, chỉ mục)",Database Designer,I,3,3.0
+1.2.3.2,3,WorkPackage,K,Thiết kế UI/UX cho 5 phân hệ vai trò (React + Tailwind CSS),UI/UX Designer,I,4,4.0
+1.2.3.3,3,WorkPackage,L,"Thiết kế kiến trúc hệ thống (Node.js, Express, Socket.io, JWT, Multer, Gemini)",Tech Lead,I,2,2.0
+1.2.3.4,3,WorkPackage,M,"Khởi tạo script SQL Server, API foundation, Socket.io và môi trường Dev/Staging",Backend Developer,J;L,3,3.0
+1.3,1,ControlAccount,,Phát triển và tích hợp,Tech Lead,,,
+1.3.1,2,ControlAccount,,"Module Tài khoản, Xác thực và Phân quyền (RBAC)",Backend Developer,,,
+1.3.1.1,3,WorkPackage,N,"BE – Đăng ký, đăng nhập JWT, chuẩn mật khẩu bảo mật và RBAC 5 vai trò",Backend Developer,M,3,3.0
+1.3.1.2,3,WorkPackage,O,BE – Ràng buộc phân tách dữ liệu theo chi nhánh cho Quản lý (1 Quản lý / 1 chi nhánh),Backend Developer,N,2,2.0
+1.3.1.3,3,WorkPackage,P,"FE – Màn hình Đăng nhập, Đăng ký (chọn khu vực cho Shipper) và Protected Routes",Frontend Developer,K;N,3,3.0
+1.3.2,2,ControlAccount,,"Module Quản trị Chi nhánh, Thực đơn và Người dùng (Chủ doanh nghiệp)",Backend Developer,,,
+1.3.2.1,3,WorkPackage,Q,BE – CRUD Chi nhánh (kèm thông tin VietQR) và CRUD Danh mục / Món ăn (upload ảnh Multer),Backend Developer,M;N,3,3.0
+1.3.2.2,3,WorkPackage,R,"FE – Giao diện Chủ doanh nghiệp quản lý Thực đơn (thêm/sửa/xóa món, preview ảnh)",Frontend Developer,K;Q,3,3.0
+1.3.2.3,3,WorkPackage,S,"BE+FE – Quản lý toàn bộ User (kể cả Quản lý, Bếp, Shipper), gán chi nhánh và khóa/mở khóa",Fullstack Developer,O;P,3,4.0
+1.3.3,2,ControlAccount,,"Module Đặt món, Giỏ hàng, Định vị GPS và Thanh toán (Khách hàng)",Fullstack Developer,,,
+1.3.3.1,3,WorkPackage,T,"BE – API thực đơn theo chi nhánh và tạo đơn hàng (lưu món, tọa độ GPS, phương thức TT)",Backend Developer,Q;N,3,3.0
+1.3.3.2,3,WorkPackage,U,"FE – Giao diện Khách hàng xem thực đơn, chọn chi nhánh và quản lý giỏ hàng",Frontend Developer,K;T,3,3.0
+1.3.3.3,3,WorkPackage,V,"FE – Định vị tự động bằng OpenStreetMap/Leaflet, ghim bản đồ và nhận diện Quận/Khu vực",Frontend Developer,U,3,3.0
+1.3.3.4,3,WorkPackage,W,BE+FE – Sinh mã thanh toán VietQR tự động theo chi nhánh và cập nhật trạng thái thanh toán,Fullstack Developer,T;U,2,2.5
+1.3.3.5,3,WorkPackage,X,FE – Theo dõi trạng thái đơn hàng Real-time và xem ảnh xác nhận giao hàng,Frontend Developer,W;P,2,2.0
+1.3.4,2,ControlAccount,,Module Quản lý chi nhánh và Điều phối đơn hàng,Fullstack Developer,,,
+1.3.4.1,3,WorkPackage,Y,"BE – API duyệt đơn xuống bếp, lọc shipper nội bộ theo khu vực và gán đơn giao",Backend Developer,O;T,3,3.0
+1.3.4.2,3,WorkPackage,Z,"FE – Màn hình Quản lý chi nhánh: Duyệt đơn, đối soát VietQR và điều phối Shipper nội bộ",Frontend Developer,K;Y,3,3.5
+1.3.5,2,ControlAccount,,Module Màn hình Bếp – Kitchen Display System (KDS),Fullstack Developer,,,
+1.3.5.1,3,WorkPackage,AA,BE – API & Socket.io đồng bộ phiếu bếp theo chi nhánh và cập nhật trạng thái chế biến,Backend Developer,Y,2,2.5
+1.3.5.2,3,WorkPackage,AB,"FE – Màn hình Bếp (KDS) hiển thị đơn Real-time, bấm bắt đầu nấu và báo hoàn thành món",Frontend Developer,K;AA,3,3.0
+1.3.6,2,ControlAccount,,Module Nhân viên giao hàng nội bộ (Shipper),Fullstack Developer,,,
+1.3.6.1,3,WorkPackage,AC,BE – API cập nhật khu vực giao hàng linh hoạt và nhận ảnh chụp xác nhận giao hàng (Multer),Backend Developer,Y,2,2.5
+1.3.6.2,3,WorkPackage,AD,"FE – Màn hình Shipper: Đổi khu vực, mở chỉ đường Google Maps từ GPS và chụp ảnh giao hàng",Frontend Developer,K;AC,3,3.5
+1.3.7,2,ControlAccount,,Module Thống kê Doanh thu và Xuất Báo cáo (Chủ doanh nghiệp),Fullstack Developer,,,
+1.3.7.1,3,WorkPackage,AE,BE – API thống kê doanh thu 12 tháng theo năm/chi nhánh và tổng hợp báo cáo Tiền mặt/VietQR,Backend Developer,T;W,2,2.5
+1.3.7.2,3,WorkPackage,AF,"FE – Dashboard Chủ doanh nghiệp: KPI Real-time, Biểu đồ cột theo tháng (Recharts) và xuất Excel (.xlsx)",Frontend Developer,K;AE,3,3.5
+1.3.8,2,ControlAccount,,Module Chatbot AI Hỗ trợ Khách hàng,Fullstack Developer,,,
+1.3.8.1,3,WorkPackage,AG,"BE – Tích hợp Gemini API với Function Calling truy vấn thực đơn, chi nhánh và đơn hàng SQL Server",Backend Developer,T;Q,3,3.0
+1.3.8.2,3,WorkPackage,AH,"FE – Khung chat nổi AI hỗ trợ khách hàng (Quick Replies, lưu lịch sử hội thoại)",Frontend Developer,U;AG,2,2.0
+1.3.9,2,ControlAccount,,Tích hợp hệ thống đầu-cuối (E2E),Tech Lead,,,
+1.3.9.1,3,WorkPackage,AI,"Tích hợp toàn bộ 5 phân hệ, Socket.io Real-time, VietQR, Leaflet, Camera và Chatbot trên Staging",Tech Lead,R;S;V;X;Z;AB;AD;AF;AH,3,4.0
+1.4,1,ControlAccount,,Kiểm thử và chấp nhận,QA Engineer,,,
+1.4.1,2,ControlAccount,,Chuẩn bị kiểm thử,QA Engineer,,,
+1.4.1.1,3,WorkPackage,AJ,Lập kế hoạch kiểm thử và test case luồng Đặt món – KDS – Shipper – VietQR – GPS,QA Engineer,F;G;I,2,2.5
+1.4.1.2,3,WorkPackage,AK,"Thiết kế test case phân quyền RBAC, quản trị Owner, báo cáo Excel và Chatbot AI",QA Engineer,H;I,2,2.0
+1.4.2,2,ControlAccount,,Thực thi kiểm thử,QA Engineer,,,
+1.4.2.1,3,WorkPackage,AL,"Thực thi kiểm thử chức năng, E2E luồng 6 trạng thái đơn và kiểm thử hồi quy",QA Engineer,AI;AJ;AK,4,4.5
+1.4.2.2,3,WorkPackage,AM,"Kiểm thử hiệu năng đồng bộ Socket.io KDS, tải ảnh xác nhận và xuất báo cáo",QA Engineer,AI,2,2.0
+1.4.2.3,3,WorkPackage,AN,"Kiểm thử bảo mật JWT, chuẩn mật khẩu và cách ly dữ liệu theo chi nhánh của Quản lý",QA Engineer,AI;O,2,2.0
+1.4.3,2,ControlAccount,,UAT và chấp nhận người dùng,Product Owner,,,
+1.4.3.1,3,WorkPackage,AO,Chuẩn bị kịch bản/dữ liệu UAT và tổ chức phiên UAT với 5 vai trò đại diện,Product Owner,AL;AM;AN,2,3.0
+1.4.3.2,3,WorkPackage,AP,Nghiệm thu UAT (UAT sign-off) và xử lý các lỗi tồn đọng sau UAT,Project Manager,AO,2,2.5
+1.5,1,ControlAccount,,Chuyển đổi và triển khai,Deployment Lead,,,
+1.5.1,2,ControlAccount,,Dữ liệu và môi trường vận hành,Deployment Lead,,,
+1.5.1.1,3,WorkPackage,AQ,"Chuẩn hóa, import và kiểm tra dữ liệu chi nhánh, thực đơn, tài khoản và VietQR lên SQL Server",Database Designer,AP,2,2.0
+1.5.2,2,ControlAccount,,Cutover và go-live,Deployment Lead,,,
+1.5.2.1,3,WorkPackage,AR,"Lập kế hoạch cutover, cấu hình HTTPS/tên miền (Cloudflare Tunnel / Hosting) và phương án rollback",Deployment Lead,AP,2,2.0
+1.5.2.2,3,WorkPackage,AS,"Triển khai go-live, smoke test toàn bộ 5 vai trò và hỗ trợ sát sao ca bán đầu (hypercare)",Deployment Lead,AQ;AR;AT,2,3.0
+1.6,1,ControlAccount,,Bàn giao và bảo hành,Project Manager,,,
+1.6.1,2,ControlAccount,,Đào tạo và tài liệu,Business Analyst,,,
+1.6.1.1,3,WorkPackage,AT,"Biên soạn tài liệu hướng dẫn và đào tạo sử dụng theo 5 vai trò (Owner, Manager, Chef, Shipper)",Business Analyst,AP,2,2.5
+1.6.1.2,3,WorkPackage,AU,"Soạn runbook vận hành, sao lưu SQL Server và biên bản bàn giao nghiệm thu",Project Manager,AS;AT,2,2.0
+1.6.2,2,WorkPackage,,Hỗ trợ bảo hành ngắn hạn sau go-live (xuyên suốt giai đoạn bảo hành),Tech Lead,,0,3.0
